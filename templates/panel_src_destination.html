@@ -1,18 +1,43 @@
 <section class="card right-panel">
   <div class="right-split">
     <div class="token-select-section">
+      <div class="token-select-controls">
+        <div class="mode-buttons-group">
+          <button id="clear-selection-btn" class="token-select-btn token-select-btn-clear">Clear</button>
+          <button id="interpretation-add-mode-btn" class="token-select-btn" data-mode="interpretation-add">Interpretation Add Mode</button>
+          <button id="interpretation-remove-mode-btn" class="token-select-btn" data-mode="interpretation-remove">Interpretation Remove Mode</button>
+          <button id="select-all-btn" class="token-select-btn token-select-btn-secondary">Select All</button>
+          <button id="remove-all-btn" class="token-select-btn token-select-btn-secondary">Remove All</button>
+        </div>
+        <div class="interpretation-status">
+          <span class="interpretation-label">Query (DST):</span>
+          <span id="query-status" class="interpretation-value">Not selected</span>
+          <span class="interpretation-label">Key (SRC):</span>
+          <span id="key-status" class="interpretation-value">Not selected</span>
+          <span id="selected-tokens-count" class="selected-tokens-count"></span>
+        </div>
+      </div>
       <div id="tokens" class="tokens tokens-right"></div>
     </div>
     <div class="right-pane head-pane">
       <div class="head-grid-header">
         <div class="head-filter-group">
-          <label class="head-filter-label">Head range:</label>
+          <label class="head-filter-label">Head:</label>
           <input type="number" id="head-filter-start" class="head-filter-input" placeholder="0" min="0" value="0">
           <span class="head-filter-separator">-</span>
           <input type="number" id="head-filter-end" class="head-filter-input" placeholder="all" min="0">
           <button id="head-filter-apply" class="head-filter-btn">Apply</button>
           <button id="head-filter-reset" class="head-filter-btn head-filter-btn-secondary">Reset</button>
           <span id="head-count-info" class="head-count-info"></span>
+        </div>
+        <div class="head-filter-group">
+          <label class="head-filter-label">Layer:</label>
+          <input type="number" id="layer-filter-start" class="head-filter-input" placeholder="0" min="0" value="0">
+          <span class="head-filter-separator">-</span>
+          <input type="number" id="layer-filter-end" class="head-filter-input" placeholder="all" min="0">
+          <button id="layer-filter-apply" class="head-filter-btn">Apply</button>
+          <button id="layer-filter-reset" class="head-filter-btn head-filter-btn-secondary">Reset</button>
+          <span id="layer-count-info" class="head-count-info"></span>
         </div>
         <div class="head-jump-group">
           <input type="number" id="head-jump-input" class="head-filter-input" placeholder="Jump to head" min="0">

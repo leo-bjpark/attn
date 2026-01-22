@@ -24,7 +24,16 @@ let lastHeadIdx = 0;
 let activeHeadCell = null;
 let headFilterStart = null;
 let headFilterEnd = null;
+let layerFilterStart = null;
+let layerFilterEnd = null;
 let currentScores = null; // Store current scores for filtering
+let interpretationTokenMode = false; // "interpretation-add" | "interpretation-remove" | false
+let selectedInterpretationTokens = new Set(); // Set of token indices
+let isDragging = false;
+let dragStart = null;
+let dragSelectionBox = null;
+let interpretationQueryIndex = null; // Query (DST) index for interpretation
+let interpretationKeyIndex = null; // Key (SRC) index for interpretation
 
 async function fetchModels() {
   const res = await fetch("/api/models");
@@ -174,6 +183,7 @@ function renderGrid(scores) {
     }
   }
   const totalHeads = scores[0].length;
+  const totalLayers = scores.length;
   
   // Apply head filter
   let startHead = 0;
@@ -189,20 +199,38 @@ function renderGrid(scores) {
     endHead = totalHeads;
   }
   
+  // Apply layer filter
+  let startLayer = 0;
+  let endLayer = totalLayers;
+  if (layerFilterStart !== null && layerFilterStart >= 0) {
+    startLayer = Math.min(layerFilterStart, totalLayers - 1);
+  }
+  if (layerFilterEnd !== null && layerFilterEnd >= 0) {
+    endLayer = Math.min(layerFilterEnd + 1, totalLayers);
+  }
+  if (startLayer >= endLayer) {
+    startLayer = 0;
+    endLayer = totalLayers;
+  }
+  
   const isPairMode = viewMode === "pair";
+  // Adjust column width based on number of layers
+  const numLayers = endLayer - startLayer;
+  const colWidth = numLayers > 32 ? "28px" : numLayers > 16 ? "30px" : "32px";
   let html =
-    "<table><thead><tr><th class='head-col' style='min-width: 44px;'>Head</th>";
-  scores.forEach((_, idx) => {
-    html += `<th style='min-width: 44px;'>L${idx}</th>`;
-  });
+    `<table><thead><tr><th class='head-col' style='min-width: 36px;'>Head</th>`;
+  for (let l = startLayer; l < endLayer; l++) {
+    html += `<th style='min-width: ${colWidth}; max-width: ${colWidth};'>L${l}</th>`;
+  }
   html += "</tr></thead><tbody>";
   for (let h = startHead; h < endHead; h++) {
     html += `<tr class="head-row" data-head="${h}"><th class='head-label' style='text-align: right; padding-right: 6px;'>H${h}</th>`;
-    for (let l = 0; l < scores.length; l++) {
+    for (let l = startLayer; l < endLayer; l++) {
       const v = scores[l][h];
-      const displayValue = v.toFixed(2);
+      // Use 1 decimal place for compact display when many layers
+      const displayValue = numLayers > 32 ? v.toFixed(1) : v.toFixed(2);
       const bgColor = colorForValue(v, isPairMode);
-      html += `<td><div class="cell" data-layer="${l}" data-head="${h}" style="background:${bgColor}" title="Layer ${l}, Head ${h}: ${v.toFixed(
+      html += `<td style='width: ${colWidth};'><div class="cell" data-layer="${l}" data-head="${h}" style="background:${bgColor}" title="Layer ${l}, Head ${h}: ${v.toFixed(
         4
       )}">${displayValue}</div></td>`;
     }
@@ -217,6 +245,17 @@ function renderGrid(scores) {
       headCountInfo.textContent = `(${totalHeads} heads)`;
     } else {
       headCountInfo.textContent = `(showing ${showing} of ${totalHeads} heads)`;
+    }
+  }
+  
+  // Update layer count info
+  const layerCountInfo = document.getElementById("layer-count-info");
+  if (layerCountInfo) {
+    const showing = endLayer - startLayer;
+    if (showing === totalLayers) {
+      layerCountInfo.textContent = `(${totalLayers} layers)`;
+    } else {
+      layerCountInfo.textContent = `(showing ${showing} of ${totalLayers} layers)`;
     }
   }
 
@@ -293,25 +332,38 @@ function renderTokenMap(layerIdx, headIdx) {
   lastLayerIdx = layerIdx;
   lastHeadIdx = headIdx;
 
-  const seqLen = currentTokens.length;
+  // Use filtered tokens if selection is active
+  const filteredIndices = selectedInterpretationTokens.size > 0
+    ? Array.from(selectedInterpretationTokens).sort((a, b) => a - b)
+    : currentTokens.map((_, idx) => idx);
+  
+  const seqLen = filteredIndices.length;
   if (!seqLen) {
     console.warn("No tokens available");
-    tokenMapEl.innerHTML = "";
+    tokenMapEl.innerHTML = "<p style='color:#9aa1b5; font-size:12px; padding:4px;'>No tokens selected for interpretation.</p>";
     return;
   }
   
-  console.log(`Rendering token map for ${seqLen} tokens`);
+  console.log(`Rendering token map for ${seqLen} tokens (${selectedInterpretationTokens.size > 0 ? 'filtered' : 'all'})`);
 
-  // No thead - key labels will be shown above diagonal cells
+  // Build table with tbody and tfoot for key labels at bottom
   let html = "<table><tbody>";
 
-  for (let dst = 0; dst < seqLen; dst++) {
+  for (let dstIdx = 0; dstIdx < seqLen; dstIdx++) {
+    const dst = filteredIndices[dstIdx];
     const rowLabel = escapeHtml(formatAxisToken(currentTokens[dst]));
-    html += `<tr><th class="token-axis-row">${rowLabel}</th>`;
-    for (let src = 0; src < seqLen; src++) {
+    // Use interpretationQueryIndex for row highlighting (Query/DST = orange)
+    const isDstRow = interpretationQueryIndex !== null && dst === interpretationQueryIndex;
+    const rowClass = isDstRow ? "token-map-row-highlight" : "";
+    html += `<tr class="${rowClass}" data-dst="${dst}"><th class="token-axis-row ${isDstRow ? 'token-axis-row-highlight' : ''}">${rowLabel}</th>`;
+    for (let srcIdx = 0; srcIdx < seqLen; srcIdx++) {
+      const src = filteredIndices[srcIdx];
+      // Use interpretationKeyIndex for column highlighting (Key/SRC = green)
+      const isSrcCol = interpretationKeyIndex !== null && src === interpretationKeyIndex;
       // Upper off-diagonal (src > dst): empty cell, no text, no color
       if (src > dst) {
-        html += `<td class="token-map-empty"></td>`;
+        const colClass = isSrcCol ? "token-map-col-highlight" : "";
+        html += `<td class="token-map-empty ${colClass}"></td>`;
         continue;
       }
       
@@ -360,22 +412,38 @@ function renderTokenMap(layerIdx, headIdx) {
         }
       }
       
-      // Diagonal cell: show key label above it
+      // Check if this is the selected cell (intersection of key and query)
+      const isSelectedCell = (interpretationKeyIndex !== null && src === interpretationKeyIndex) && (interpretationQueryIndex !== null && dst === interpretationQueryIndex);
+      const colClass = isSrcCol ? "token-map-col-highlight" : "";
+      
+      // Diagonal cell: no label above, will show in footer
       if (src === dst) {
-        const keyLabel = escapeHtml(formatAxisToken(currentTokens[src]));
         const bgColor = colorForValue(v, true);
         const displayValue = v.toFixed(2);
-        html += `<td class="token-map-diagonal"><div class="token-map-key-label">${keyLabel}</div><div class="token-map-cell" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
+        const cellClass = isSelectedCell ? "token-map-cell-selected" : "";
+        html += `<td class="token-map-diagonal ${colClass}"><div class="token-map-cell ${cellClass}" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
       } else {
         // Lower diagonal: normal cell
         const bgColor = colorForValue(v, true);
         const displayValue = v.toFixed(2);
-        html += `<td><div class="token-map-cell" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
+        const cellClass = isSelectedCell ? "token-map-cell-selected" : "";
+        html += `<td class="${colClass}"><div class="token-map-cell ${cellClass}" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
       }
     }
     html += "</tr>";
   }
-  html += "</tbody></table>";
+  html += "</tbody><tfoot><tr><th class='token-map-footer-label'>Key (SRC)</th>";
+  
+  // Add key labels in footer row
+  for (let srcIdx = 0; srcIdx < seqLen; srcIdx++) {
+    const src = filteredIndices[srcIdx];
+    const keyLabel = escapeHtml(formatAxisToken(currentTokens[src]));
+    // Use interpretationKeyIndex for column highlighting (Key/SRC = green)
+    const isSrcCol = interpretationKeyIndex !== null && src === interpretationKeyIndex;
+    const colClass = isSrcCol ? "token-map-col-highlight" : "";
+    html += `<td class="token-map-key-footer ${colClass}"><div class="token-map-key-label-bottom ${isSrcCol ? 'token-map-key-label-highlight' : ''}">${keyLabel}</div></td>`;
+  }
+  html += "</tr></tfoot></table>";
   tokenMapEl.innerHTML = `
     <div class="token-map-layout">
       <div class="token-map-corner"></div>
@@ -411,45 +479,443 @@ function renderTokens(tokens) {
     const base = clean;
     const isSrc = idx === srcIndex;
     const isDst = idx === dstIndex;
+    const isSelected = selectedInterpretationTokens.has(idx);
+    const isInterpretationQuery = interpretationQueryIndex === idx;
+    const isInterpretationKey = interpretationKeyIndex === idx;
+    // Query 이후 토큰은 Query만 선택되고 Key가 아직 선택되지 않았을 때만 비활성화
+    const isAfterQuery = interpretationQueryIndex !== null && interpretationKeyIndex === null && idx > interpretationQueryIndex;
+    
     let borderColor = "#2a2f42";
+    let borderWidth = "1px";
     let bg = "#1a1d2e";
     let textColor = "#e6e8f0";
+    let classes = "token";
+    let disabled = false;
+    let opacity = "1";
     
-    if (isSrc) {
-      borderColor = "#4ade80";
-      bg = "#1a3a2a";
-      textColor = "#e6e8f0";
-    } else if (isDst) {
-      borderColor = "#f97316";
-      bg = "#3a2a1a";
-      textColor = "#e6e8f0";
+    // Query/Key 표시 (interpretationQueryIndex/interpretationKeyIndex 사용)
+    // Query/Key가 선택되어 있으면 src/dst는 표시하지 않음
+    if (isInterpretationQuery) {
+      borderColor = "#f97316"; // 주황색 (Query/DST)
+      borderWidth = "2px";
+    } else if (isInterpretationKey) {
+      borderColor = "#4ade80"; // 초록색 (Key/SRC)
+      borderWidth = "2px";
+    } else if (interpretationQueryIndex === null && interpretationKeyIndex === null) {
+      // Query/Key가 선택되지 않았을 때만 src/dst 표시
+      if (isSrc) {
+        borderColor = "#4ade80"; // 초록색 (Key/SRC)
+        borderWidth = "2px";
+      } else if (isDst) {
+        borderColor = "#f97316"; // 주황색 (Query/DST)
+        borderWidth = "2px";
+      }
     }
     
+    // Query 이후 토큰은 비활성화 (Query가 선택된 경우)
+    if (isAfterQuery) {
+      disabled = true;
+      opacity = "0.3";
+      classes += " token-disabled";
+    }
+    
+    // Interpretation mode
+    if (interpretationTokenMode === "interpretation-add" || interpretationTokenMode === "interpretation-remove") {
+      classes += " interpretation-mode";
+    }
+    
+    // 선택된 토큰: 배경색만 (Query/Key가 아닌 경우만)
+    if (isSelected && !isInterpretationQuery && !isInterpretationKey) {
+      bg = "rgba(97, 218, 251, 0.2)"; // 파란색 배경
+      classes += " interpretation-selected";
+    }
+    
+    const disabledAttr = disabled ? "disabled" : "";
     pieces.push(
-      `<button class="token" data-idx="${idx}" style="display:inline-flex !important; flex-shrink:0 !important; margin:0 !important; border-color:${borderColor};background:${bg};color:${textColor}">${base}</button>`
+      `<button class="${classes}" data-idx="${idx}" ${disabledAttr} style="display:inline-flex !important; flex-shrink:0 !important; margin:0 !important; border:${borderWidth} solid ${borderColor};background:${bg};color:${textColor};opacity:${opacity}">${base}</button>`
     );
   });
   tokensEl.innerHTML = pieces.join("");
 
+  // Update interpretation status
+  const queryStatusEl = document.getElementById("query-status");
+  const keyStatusEl = document.getElementById("key-status");
+  const countEl = document.getElementById("selected-tokens-count");
+  
+  if (queryStatusEl) {
+    if (interpretationQueryIndex !== null && currentTokens) {
+      const tokenText = formatAxisToken(currentTokens[interpretationQueryIndex]);
+      queryStatusEl.textContent = tokenText;
+      queryStatusEl.classList.add("selected");
+    } else {
+      queryStatusEl.textContent = "Not selected";
+      queryStatusEl.classList.remove("selected");
+    }
+  }
+  
+  if (keyStatusEl) {
+    if (interpretationKeyIndex !== null && currentTokens) {
+      const tokenText = formatAxisToken(currentTokens[interpretationKeyIndex]);
+      keyStatusEl.textContent = tokenText;
+      keyStatusEl.classList.add("selected");
+    } else {
+      keyStatusEl.textContent = "Not selected";
+      keyStatusEl.classList.remove("selected");
+    }
+  }
+  
+  if (countEl) {
+    // Count only interpretation tokens (exclude Query/Key)
+    const interpretationCount = Array.from(selectedInterpretationTokens).filter(
+      idx => idx !== interpretationQueryIndex && idx !== interpretationKeyIndex
+    ).length;
+    if (interpretationCount > 0) {
+      countEl.textContent = `${interpretationCount} tokens selected`;
+    } else {
+      countEl.textContent = "";
+    }
+  }
+
+  // Setup click handlers
   document.querySelectorAll(".token").forEach((el) => {
-    el.addEventListener("click", () => {
-      const idx = Number(el.getAttribute("data-idx"));
-      if (srcIndex === null || (srcIndex !== null && dstIndex !== null)) {
-        srcIndex = idx;
-        dstIndex = null;
-      } else if (dstIndex === null && idx !== srcIndex) {
-        dstIndex = idx;
-      } else {
-        srcIndex = idx;
-        dstIndex = null;
+    el.addEventListener("click", (e) => {
+      if (interpretationTokenMode === "interpretation-add") {
+        // Interpretation Add Mode: add tokens to interpretation set (independent of query/key)
+        e.stopPropagation();
+        const idx = Number(el.getAttribute("data-idx"));
+        
+        // Simply toggle token selection for visualization filtering
+        if (selectedInterpretationTokens.has(idx)) {
+          selectedInterpretationTokens.delete(idx);
+        } else {
+          selectedInterpretationTokens.add(idx);
+        }
+        renderTokens(tokens);
+        updateFilteredVisualizations();
+        return;
+      } else if (interpretationTokenMode === "interpretation-remove") {
+        // Interpretation Remove Mode: remove tokens from interpretation set
+        e.stopPropagation();
+        const idx = Number(el.getAttribute("data-idx"));
+        
+        selectedInterpretationTokens.delete(idx);
+        if (idx === interpretationQueryIndex) {
+          interpretationQueryIndex = null;
+          interpretationKeyIndex = null;
+          selectedInterpretationTokens.clear();
+        } else if (idx === interpretationKeyIndex) {
+          interpretationKeyIndex = null;
+          selectedInterpretationTokens.delete(idx);
+        }
+        renderTokens(tokens);
+        updateFilteredVisualizations();
+        return;
       }
+      
+      // Normal mode: select Query/Key or src/dst
+      const idx = Number(el.getAttribute("data-idx"));
+      
+      // Ignore clicks on disabled tokens (after query, only when key is not selected)
+      if (el.disabled || el.classList.contains("token-disabled")) {
+        return;
+      }
+      
+      // Query/Key selection (always available)
+      // Query 선택: 항상 새로운 Query로 선택 (어떤 위치든)
+      if (interpretationQueryIndex === null) {
+        // First query selection
+        interpretationQueryIndex = idx;
+        interpretationKeyIndex = null;
+        selectedInterpretationTokens.clear();
+      } else if (interpretationKeyIndex === null) {
+        // Query is selected, now select key
+        if (idx === interpretationQueryIndex) {
+          // Clicking same query again - reset query
+          interpretationQueryIndex = null;
+          selectedInterpretationTokens.clear();
+        } else if (idx <= interpretationQueryIndex) {
+          // Select key (SRC) - must be before or equal to query
+          interpretationKeyIndex = idx;
+          selectedInterpretationTokens.clear();
+        } else {
+          // Cannot select key after query (causal attention)
+          alert("Key (SRC) must be at or before Query (DST) position due to causal attention.");
+          return;
+        }
+      } else {
+        // Both Query and Key selected
+        if (idx === interpretationQueryIndex) {
+          // Clicking query again - reset to new query only
+          interpretationQueryIndex = idx;
+          interpretationKeyIndex = null;
+          selectedInterpretationTokens.clear();
+        } else if (idx === interpretationKeyIndex) {
+          // Clicking key again - reset key only
+          interpretationKeyIndex = null;
+          selectedInterpretationTokens.clear();
+        } else if (idx > interpretationQueryIndex) {
+          // Clicking after query - select as new query
+          interpretationQueryIndex = idx;
+          interpretationKeyIndex = null;
+          selectedInterpretationTokens.clear();
+        } else {
+          // Query/Key가 모두 선택된 상태에서 다른 토큰 클릭 시
+          // Interpretation Add Mode가 아닌 경우에는 아무것도 하지 않음
+          // (Interpretation Add Mode에서만 토큰 추가 가능)
+          if (interpretationTokenMode !== "interpretation-add" && interpretationTokenMode !== "interpretation-remove") {
+            // Do nothing - just maintain Query/Key selection
+            return;
+          }
+          // Interpretation mode에서는 토큰 추가/제거 가능
+          if (selectedInterpretationTokens.has(idx)) {
+            selectedInterpretationTokens.delete(idx);
+          } else {
+            // Add to selection if it's between key and query
+            if (idx >= interpretationKeyIndex && idx <= interpretationQueryIndex) {
+              selectedInterpretationTokens.add(idx);
+            }
+          }
+        }
+      }
+      
       renderTokens(tokens);
-      if (allAttentions !== null && srcIndex !== null && dstIndex !== null) {
-        const key = `${srcIndex}_${dstIndex}`;
-        if (allAttentions[key]) renderGrid(allAttentions[key]);
+      updateFilteredVisualizations();
+      
+      // Update attention visualization if Query/Key are both selected
+      if (interpretationQueryIndex !== null && interpretationKeyIndex !== null) {
+        const key = `${interpretationKeyIndex}_${interpretationQueryIndex}`;
+        if (allAttentions && allAttentions[key]) {
+          renderGrid(allAttentions[key]);
+          // Update token map with current layer/head selection
+          if (lastLayerIdx !== null && lastHeadIdx !== null) {
+            renderTokenMap(lastLayerIdx, lastHeadIdx);
+          } else {
+            // Default to first layer and head if not set
+            renderTokenMap(0, 0);
+          }
+        }
       }
     });
   });
+
+  // Setup drag selection
+  if (interpretationTokenMode === "interpretation-add" || interpretationTokenMode === "interpretation-remove") {
+    setupDragSelection();
+  }
+}
+
+function setupDragSelection() {
+  if (!tokensEl) return;
+  
+  tokensEl.addEventListener("mousedown", (e) => {
+    if ((interpretationTokenMode !== "interpretation-add" && interpretationTokenMode !== "interpretation-remove") || e.target.closest(".token")) return;
+    isDragging = true;
+    const rect = tokensEl.getBoundingClientRect();
+    dragStart = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+    
+    if (!dragSelectionBox) {
+      dragSelectionBox = document.createElement("div");
+      dragSelectionBox.className = "drag-selection-box";
+      tokensEl.style.position = "relative";
+      tokensEl.appendChild(dragSelectionBox);
+    }
+    dragSelectionBox.style.display = "block";
+    dragSelectionBox.style.left = dragStart.x + "px";
+    dragSelectionBox.style.top = dragStart.y + "px";
+    dragSelectionBox.style.width = "0px";
+    dragSelectionBox.style.height = "0px";
+  });
+
+  tokensEl.addEventListener("mousemove", (e) => {
+    if (!isDragging || !dragStart) return;
+    const rect = tokensEl.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    
+    const left = Math.min(dragStart.x, currentX);
+    const top = Math.min(dragStart.y, currentY);
+    const width = Math.abs(currentX - dragStart.x);
+    const height = Math.abs(currentY - dragStart.y);
+    
+    dragSelectionBox.style.left = left + "px";
+    dragSelectionBox.style.top = top + "px";
+    dragSelectionBox.style.width = width + "px";
+    dragSelectionBox.style.height = height + "px";
+    
+    // Select tokens in the selection box
+    document.querySelectorAll(".token").forEach((tokenEl) => {
+      const tokenRect = tokenEl.getBoundingClientRect();
+      const tokenElRect = tokensEl.getBoundingClientRect();
+      const tokenX = tokenRect.left - tokenElRect.left;
+      const tokenY = tokenRect.top - tokenElRect.top;
+      const tokenWidth = tokenRect.width;
+      const tokenHeight = tokenRect.height;
+      
+      const tokenCenterX = tokenX + tokenWidth / 2;
+      const tokenCenterY = tokenY + tokenHeight / 2;
+      
+      if (tokenCenterX >= left && tokenCenterX <= left + width &&
+          tokenCenterY >= top && tokenCenterY <= top + height) {
+        const idx = Number(tokenEl.getAttribute("data-idx"));
+        
+        if (interpretationTokenMode === "interpretation-remove") {
+          selectedInterpretationTokens.delete(idx);
+          if (idx === interpretationQueryIndex) {
+            interpretationQueryIndex = null;
+            interpretationKeyIndex = null;
+            selectedInterpretationTokens.clear();
+          } else if (idx === interpretationKeyIndex) {
+            interpretationKeyIndex = null;
+          }
+        } else if (interpretationTokenMode === "interpretation-add") {
+          // In add mode: freely add any tokens for visualization filtering
+          selectedInterpretationTokens.add(idx);
+        }
+      }
+    });
+    renderTokens(currentTokens);
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      if (dragSelectionBox) {
+        dragSelectionBox.style.display = "none";
+      }
+      updateFilteredVisualizations();
+    }
+  });
+}
+
+function updateFilteredVisualizations() {
+  if (!currentTokens || !allAttentions) return;
+  
+  // Filter tokens based on interpretation selection
+  const filteredIndices = selectedInterpretationTokens.size > 0
+    ? Array.from(selectedInterpretationTokens).sort((a, b) => a - b)
+    : currentTokens.map((_, idx) => idx);
+  
+  // Update grid if src/dst are selected
+  if (srcIndex !== null && dstIndex !== null) {
+    const key = `${srcIndex}_${dstIndex}`;
+    if (allAttentions[key]) {
+      renderGrid(allAttentions[key]);
+    }
+  }
+  
+  // Update token map with filtered view if interpretation tokens are selected
+  if (selectedInterpretationTokens.size > 0 && lastLayerIdx !== null && lastHeadIdx !== null) {
+    renderTokenMapFiltered(lastLayerIdx, lastHeadIdx, filteredIndices);
+  } else if (lastLayerIdx !== null && lastHeadIdx !== null) {
+    // Show all tokens if no interpretation selection
+    renderTokenMap(lastLayerIdx, lastHeadIdx);
+  }
+}
+
+function renderTokenMapFiltered(layerIdx, headIdx, filteredIndices) {
+  // Similar to renderTokenMap but only show filtered tokens
+  if (!tokenMapEl || !allAttentions || !currentTokens) return;
+  
+  const seqLen = filteredIndices.length;
+  if (seqLen === 0) {
+    tokenMapEl.innerHTML = "<p style='color:#9aa1b5; font-size:12px; padding:4px;'>No tokens selected for interpretation.</p>";
+    return;
+  }
+  
+  let html = "<table><tbody>";
+  
+  for (let dstIdx = 0; dstIdx < seqLen; dstIdx++) {
+    const dst = filteredIndices[dstIdx];
+    const rowLabel = escapeHtml(formatAxisToken(currentTokens[dst]));
+    // Use interpretationQueryIndex for row highlighting (Query/DST = orange)
+    const isDstRow = interpretationQueryIndex !== null && dst === interpretationQueryIndex;
+    const rowClass = isDstRow ? "token-map-row-highlight" : "";
+    html += `<tr class="${rowClass}" data-dst="${dst}"><th class="token-axis-row ${isDstRow ? 'token-axis-row-highlight' : ''}">${rowLabel}</th>`;
+    
+    for (let srcIdx = 0; srcIdx < seqLen; srcIdx++) {
+      const src = filteredIndices[srcIdx];
+      // Use interpretationKeyIndex for column highlighting (Key/SRC = green)
+      const isSrcCol = interpretationKeyIndex !== null && src === interpretationKeyIndex;
+      
+      if (src > dst) {
+        const colClass = isSrcCol ? "token-map-col-highlight" : "";
+        html += `<td class="token-map-empty ${colClass}"></td>`;
+        continue;
+      }
+      
+      const key = `${src}_${dst}`;
+      const perPair = allAttentions[key] || null;
+      let v = 0;
+      
+      if (perPair) {
+        if (tokenMapMode === "head") {
+          if (perPair[layerIdx] && typeof perPair[layerIdx][headIdx] === "number") {
+            v = perPair[layerIdx][headIdx];
+          }
+        } else if (tokenMapMode === "layer") {
+          const layerVals = perPair[layerIdx];
+          if (Array.isArray(layerVals) && layerVals.length > 0) {
+            const sum = layerVals.reduce((acc, val) => acc + (typeof val === "number" ? val : 0), 0);
+            v = sum / layerVals.length;
+          }
+        } else if (tokenMapMode === "overall") {
+          let total = 0;
+          let count = 0;
+          perPair.forEach((layer) => {
+            if (Array.isArray(layer)) {
+              layer.forEach((val) => {
+                if (typeof val === "number") {
+                  total += val;
+                  count += 1;
+                }
+              });
+            }
+          });
+          if (count > 0) v = total / count;
+        }
+      }
+      
+      // Check if this is the selected cell (intersection of key and query)
+      const isSelectedCell = (interpretationKeyIndex !== null && src === interpretationKeyIndex) && (interpretationQueryIndex !== null && dst === interpretationQueryIndex);
+      const colClass = isSrcCol ? "token-map-col-highlight" : "";
+      
+      if (src === dst) {
+        const bgColor = colorForValue(v, true);
+        const displayValue = v.toFixed(2);
+        const cellClass = isSelectedCell ? "token-map-cell-selected" : "";
+        html += `<td class="token-map-diagonal ${colClass}"><div class="token-map-cell ${cellClass}" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
+      } else {
+        const bgColor = colorForValue(v, true);
+        const displayValue = v.toFixed(2);
+        const cellClass = isSelectedCell ? "token-map-cell-selected" : "";
+        html += `<td class="${colClass}"><div class="token-map-cell ${cellClass}" style="background:${bgColor}" title="q=${dst}, k=${src}, L${layerIdx}, H${headIdx}: ${v.toFixed(4)}">${displayValue}</div></td>`;
+      }
+    }
+    html += "</tr>";
+  }
+  
+  html += "</tbody><tfoot><tr><th class='token-map-footer-label'>Key (SRC)</th>";
+  for (let srcIdx = 0; srcIdx < seqLen; srcIdx++) {
+    const src = filteredIndices[srcIdx];
+    const keyLabel = escapeHtml(formatAxisToken(currentTokens[src]));
+    // Use interpretationKeyIndex for column highlighting (Key/SRC = green)
+    const isSrcCol = interpretationKeyIndex !== null && src === interpretationKeyIndex;
+    const colClass = isSrcCol ? "token-map-col-highlight" : "";
+    html += `<td class="token-map-key-footer ${colClass}"><div class="token-map-key-label-bottom ${isSrcCol ? 'token-map-key-label-highlight' : ''}">${keyLabel}</div></td>`;
+  }
+  html += "</tr></tfoot></table>";
+  
+  tokenMapEl.innerHTML = `
+    <div class="token-map-layout">
+      <div class="token-map-corner"></div>
+      <div class="token-map-axis token-map-axis-top">Key (SRC) →</div>
+      <div class="token-map-axis token-map-axis-left">Query (DST) ↓</div>
+      <div class="token-map-table-wrap">${html}</div>
+    </div>
+  `;
 }
 
 async function computeAllPairs(prompt) {
@@ -655,6 +1121,152 @@ if (headJumpBtn) {
 if (headJumpInput) {
   headJumpInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") jumpToHead();
+  });
+}
+
+// Layer filter controls
+const layerFilterStartInput = document.getElementById("layer-filter-start");
+const layerFilterEndInput = document.getElementById("layer-filter-end");
+const layerFilterApplyBtn = document.getElementById("layer-filter-apply");
+const layerFilterResetBtn = document.getElementById("layer-filter-reset");
+
+function applyLayerFilter() {
+  const start = layerFilterStartInput.value ? parseInt(layerFilterStartInput.value) : null;
+  const end = layerFilterEndInput.value ? parseInt(layerFilterEndInput.value) : null;
+  
+  if (start !== null && start < 0) {
+    alert("Start layer must be >= 0");
+    return;
+  }
+  if (end !== null && end < 0) {
+    alert("End layer must be >= 0");
+    return;
+  }
+  if (start !== null && end !== null && start > end) {
+    alert("Start layer must be <= end layer");
+    return;
+  }
+  
+  layerFilterStart = start;
+  layerFilterEnd = end;
+  
+  if (currentScores) {
+    renderGrid(currentScores);
+  }
+}
+
+function resetLayerFilter() {
+  layerFilterStart = null;
+  layerFilterEnd = null;
+  layerFilterStartInput.value = "0";
+  layerFilterEndInput.value = "";
+  if (currentScores) {
+    renderGrid(currentScores);
+  }
+}
+
+if (layerFilterApplyBtn) {
+  layerFilterApplyBtn.addEventListener("click", applyLayerFilter);
+}
+if (layerFilterResetBtn) {
+  layerFilterResetBtn.addEventListener("click", resetLayerFilter);
+}
+
+// Mode button handlers
+const interpretationAddModeBtn = document.getElementById("interpretation-add-mode-btn");
+const interpretationRemoveModeBtn = document.getElementById("interpretation-remove-mode-btn");
+
+function setMode(mode) {
+  // Remove active class from all buttons
+  [interpretationAddModeBtn, interpretationRemoveModeBtn].forEach(btn => {
+    if (btn) btn.classList.remove("active");
+  });
+  
+  // Set new mode
+  interpretationTokenMode = mode;
+  
+  // Add active class to current mode button
+  if (mode === "interpretation-add" && interpretationAddModeBtn) {
+    interpretationAddModeBtn.classList.add("active");
+  } else if (mode === "interpretation-remove" && interpretationRemoveModeBtn) {
+    interpretationRemoveModeBtn.classList.add("active");
+  }
+  
+  // Don't clear selectedInterpretationTokens when mode is turned off
+  // Selected tokens should persist even when mode is off
+  
+  if (currentTokens) {
+    renderTokens(currentTokens);
+    updateFilteredVisualizations();
+  }
+}
+
+if (interpretationAddModeBtn) {
+  interpretationAddModeBtn.addEventListener("click", () => {
+    if (interpretationTokenMode === "interpretation-add") {
+      setMode(false); // Toggle off
+    } else {
+      setMode("interpretation-add");
+    }
+  });
+}
+
+if (interpretationRemoveModeBtn) {
+  interpretationRemoveModeBtn.addEventListener("click", () => {
+    if (interpretationTokenMode === "interpretation-remove") {
+      setMode(false); // Toggle off
+    } else {
+      setMode("interpretation-remove");
+    }
+  });
+}
+
+// Select All / Remove All buttons
+const selectAllBtn = document.getElementById("select-all-btn");
+const removeAllBtn = document.getElementById("remove-all-btn");
+
+if (selectAllBtn) {
+  selectAllBtn.addEventListener("click", () => {
+    if (!currentTokens) return;
+    // Select all tokens (except Query/Key which are managed separately)
+    currentTokens.forEach((_, idx) => {
+      if (idx !== interpretationQueryIndex && idx !== interpretationKeyIndex) {
+        selectedInterpretationTokens.add(idx);
+      }
+    });
+    if (currentTokens) {
+      renderTokens(currentTokens);
+      updateFilteredVisualizations();
+    }
+  });
+}
+
+if (removeAllBtn) {
+  removeAllBtn.addEventListener("click", () => {
+    // Remove all selected interpretation tokens (Query/Key는 별도 관리이므로 제외)
+    selectedInterpretationTokens.clear();
+    if (currentTokens) {
+      renderTokens(currentTokens);
+      updateFilteredVisualizations();
+    }
+  });
+}
+
+// Clear button - reset all token selections
+const clearSelectionBtn = document.getElementById("clear-selection-btn");
+if (clearSelectionBtn) {
+  clearSelectionBtn.addEventListener("click", () => {
+    // Clear all: Query, Key, and interpretation tokens
+    interpretationQueryIndex = null;
+    interpretationKeyIndex = null;
+    selectedInterpretationTokens.clear();
+    srcIndex = null;
+    dstIndex = null;
+    
+    if (currentTokens) {
+      renderTokens(currentTokens);
+      updateFilteredVisualizations();
+    }
   });
 }
 

@@ -172,7 +172,7 @@ main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   padding: 4px;
   border: 1px solid #2a2f42;
   border-radius: 6px;
@@ -195,7 +195,7 @@ main {
 }
  .grid table {
    border-collapse: separate;
-  border-spacing: 4px 2px;
+  border-spacing: 2px 1px;
   min-width: 0;
   width: 100%;
    table-layout: fixed;
@@ -207,16 +207,16 @@ main {
    vertical-align: middle;
  }
  .grid th {
-  font-size: 9px;
+  font-size: 8px;
    color: #c5c9d6;
    font-weight: 500;
    position: sticky;
    top: 0;
    background: #1a1d2e;
    z-index: 2;
-  padding: 3px 4px;
+  padding: 2px 3px;
    border-bottom: 1px solid #2a2f42;
-   border-radius: 4px;
+   border-radius: 3px;
  }
  .grid thead th:first-child {
    left: 0;
@@ -227,12 +227,12 @@ main {
    left: 0;
    z-index: 1;
    background: #1a1d2e;
-  padding: 2px 6px;
-   border-radius: 4px;
+  padding: 1px 4px;
+   border-radius: 3px;
    border-right: 1px solid #2a2f42;
    text-align: right;
-  min-width: 44px;
-  font-size: 9px;
+  min-width: 36px;
+  font-size: 8px;
  }
  .grid th.head-col,
  .grid tbody th.head-label {
@@ -241,19 +241,20 @@ main {
    background: rgba(22, 26, 43, 0.95);
  }
  .cell {
-  width: 32px;
-  height: 24px;
-   border-radius: 3px;
+  width: 28px;
+  height: 20px;
+   border-radius: 2px;
    margin: 0 auto;
    position: relative;
    transition: opacity 0.15s ease;
-   border: 1px solid rgba(255, 255, 255, 0.1);
+   border: 1px solid rgba(255, 255, 255, 0.08);
    display: flex;
    align-items: center;
    justify-content: center;
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 600;
   color: #0f111a; /* 밝은 배경에서도 잘 보이도록 어두운 색상 */
+  line-height: 1;
  }
  .cell:hover {
    opacity: 0.85;
@@ -366,11 +367,27 @@ main {
 .chat-log {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
   border: 1px solid #2a2f42;
   border-radius: 8px;
   background: #101427;
+}
+/* Custom scrollbar for chat log */
+.chat-log::-webkit-scrollbar {
+  width: 8px;
+}
+.chat-log::-webkit-scrollbar-track {
+  background: #101427;
+  border-radius: 4px;
+}
+.chat-log::-webkit-scrollbar-thumb {
+  background: #3a3f52;
+  border-radius: 4px;
+}
+.chat-log::-webkit-scrollbar-thumb:hover {
+  background: #4a4f62;
 }
 .chat-msg {
   display: flex;
@@ -449,6 +466,118 @@ main {
   flex-shrink: 0;
   padding: 6px 0;
 }
+.token-select-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #1a1d2e;
+  border: 1px solid #2a2f42;
+  border-radius: 6px;
+}
+.mode-buttons-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.token-select-btn {
+  padding: 6px 12px !important;
+  font-size: 11px !important;
+  width: auto !important;
+  background: #3a3f52 !important;
+  border: 1px solid #4a4f62 !important;
+  flex: 1;
+  min-width: 150px;
+}
+.token-select-btn.active {
+  background: #4ade80 !important;
+  border-color: #4ade80 !important;
+  color: #0f111a !important;
+  font-weight: 600;
+}
+.token-select-btn[data-mode="query-key"].active {
+  background: #61dafb !important;
+  border-color: #61dafb !important;
+  color: #0f111a !important;
+}
+.token-select-btn[data-mode="interpretation-add"].active {
+  background: #4ade80 !important;
+  border-color: #4ade80 !important;
+  color: #0f111a !important;
+}
+.token-select-btn[data-mode="interpretation-remove"].active {
+  background: #f97316 !important;
+  border-color: #f97316 !important;
+  color: #0f111a !important;
+}
+.token-select-btn-secondary {
+  background: #2a2f42 !important;
+  border-color: #3a3f52 !important;
+  font-size: 10px !important;
+  padding: 5px 10px !important;
+}
+.token-select-btn-secondary:hover {
+  background: #3a3f52 !important;
+  border-color: #4a4f62 !important;
+}
+.token-select-btn-clear {
+  background: #f97316 !important;
+  border-color: #f97316 !important;
+  color: #0f111a !important;
+  font-weight: 600;
+}
+.token-select-btn-clear:hover {
+  background: #fb923c !important;
+  border-color: #fb923c !important;
+}
+.selected-tokens-count {
+  font-size: 11px;
+  color: #9aa1b5;
+  margin-left: 12px;
+}
+.interpretation-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.interpretation-label {
+  color: #9aa1b5;
+  font-weight: 500;
+}
+.interpretation-value {
+  color: #e6e8f0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #2a2f42;
+  min-width: 60px;
+  text-align: center;
+}
+.interpretation-value.selected {
+  background: #3a3f52;
+  color: #e6e8f0;
+}
+.tokens.tokens-right {
+  position: relative;
+}
+.token.interpretation-selected {
+  background: rgba(97, 218, 251, 0.2) !important;
+}
+.token.interpretation-mode {
+  cursor: crosshair;
+}
+.token.token-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.drag-selection-box {
+  position: absolute;
+  border: 2px dashed #61dafb;
+  background: rgba(97, 218, 251, 0.1);
+  pointer-events: none;
+  z-index: 100;
+}
 .tokens.tokens-right {
   display: flex !important;
   flex-direction: row !important;
@@ -481,6 +610,7 @@ main {
   border: 1px solid #2a2f42;
   border-radius: 6px;
   margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 .head-filter-group,
 .head-jump-group {
@@ -613,7 +743,7 @@ main {
 }
 .token-map-table-wrap {
   display: inline-block;
-  padding-top: 14px; /* space for diagonal key labels */
+  padding-top: 4px;
   padding-left: 4px;
 }
 .token-map-grid table {
@@ -621,6 +751,15 @@ main {
   border-spacing: 2px 2px;
   width: max-content;
   table-layout: fixed;
+}
+.token-map-grid tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #1a1d2e;
+}
+.token-map-grid tfoot tr {
+  background: #1a1d2e;
 }
 .token-map-grid th,
 .token-map-grid td {
@@ -638,17 +777,36 @@ main {
   position: relative;
   padding: 0;
 }
-.token-map-key-label {
-  position: absolute;
-  top: -16px;
-  left: 50%;
-  transform: translateX(-50%);
+/* Key labels at bottom (footer) */
+.token-map-key-label-bottom {
   font-size: 9px;
   color: #4ade80; /* src color (green) */
   white-space: nowrap;
-  pointer-events: none;
-  z-index: 1;
-  line-height: 1;
+  padding: 4px 2px;
+  line-height: 1.2;
+  background: rgba(15, 17, 26, 0.95);
+  border-radius: 3px;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  font-weight: 500;
+  display: inline-block;
+  min-width: 28px;
+  text-align: center;
+}
+.token-map-key-footer {
+  padding: 4px 0 !important;
+  vertical-align: bottom;
+}
+.token-map-footer-label {
+  font-size: 9px;
+  color: #4ade80;
+  font-weight: 500;
+  padding: 4px 6px !important;
+  text-align: right;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #1a1d2e;
+  border-right: 1px solid #2a2f42;
 }
 .token-axis-row {
   font-size: 10px;
@@ -671,5 +829,38 @@ main {
   align-items: center;
   justify-content: center;
   color: #0f111a;
+}
+/* Highlight selected src (key) column */
+.token-map-col-highlight {
+  background-color: rgba(74, 222, 128, 0.15) !important; /* green tint for SRC */
+}
+/* Highlight selected dst (query) row */
+.token-map-row-highlight {
+  background-color: rgba(249, 115, 22, 0.15) !important; /* orange tint for DST */
+}
+.token-map-row-highlight td {
+  background-color: rgba(249, 115, 22, 0.1) !important;
+}
+/* Highlight intersection cell (both src and dst) */
+.token-map-cell-selected {
+  outline: 2px solid #fff700 !important; /* yellow border */
+  outline-offset: -1px;
+  box-shadow: 0 0 0 1px rgba(255, 247, 0, 0.5) !important;
+  z-index: 10;
+  position: relative;
+}
+/* Highlight row label */
+.token-axis-row-highlight {
+  background-color: rgba(249, 115, 22, 0.25) !important;
+  color: #f97316 !important;
+  font-weight: 600 !important;
+}
+/* Highlight key label */
+.token-map-key-label-highlight {
+  background-color: rgba(74, 222, 128, 0.25) !important;
+  color: #4ade80 !important;
+  font-weight: 600 !important;
+  padding: 1px 3px;
+  border-radius: 2px;
 }
 
