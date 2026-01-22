@@ -22,6 +22,9 @@ let tokenMapMode = "head"; // "head" | "layer" | "overall"
 let lastLayerIdx = 0;
 let lastHeadIdx = 0;
 let activeHeadCell = null;
+let headFilterStart = null;
+let headFilterEnd = null;
+let currentScores = null; // Store current scores for filtering
 
 async function fetchModels() {
   const res = await fetch("/api/models");
@@ -159,6 +162,10 @@ function renderGrid(scores) {
       "<p style='color:#c5c9d6; font-weight: 500;'>No scores yet</p>";
     return;
   }
+  
+  // Store scores for filtering
+  currentScores = scores;
+  
   // Debug: log first few values to verify they're different
   if (scores.length > 0 && scores[0].length > 0) {
     console.log("First layer, first head value:", scores[0][0]);
@@ -166,7 +173,22 @@ function renderGrid(scores) {
       console.log("Second layer, first head value:", scores[1][0]);
     }
   }
-  const heads = scores[0].length;
+  const totalHeads = scores[0].length;
+  
+  // Apply head filter
+  let startHead = 0;
+  let endHead = totalHeads;
+  if (headFilterStart !== null && headFilterStart >= 0) {
+    startHead = Math.min(headFilterStart, totalHeads - 1);
+  }
+  if (headFilterEnd !== null && headFilterEnd >= 0) {
+    endHead = Math.min(headFilterEnd + 1, totalHeads);
+  }
+  if (startHead >= endHead) {
+    startHead = 0;
+    endHead = totalHeads;
+  }
+  
   const isPairMode = viewMode === "pair";
   let html =
     "<table><thead><tr><th class='head-col' style='min-width: 44px;'>Head</th>";
@@ -174,8 +196,8 @@ function renderGrid(scores) {
     html += `<th style='min-width: 44px;'>L${idx}</th>`;
   });
   html += "</tr></thead><tbody>";
-  for (let h = 0; h < heads; h++) {
-    html += `<tr><th class='head-label' style='text-align: right; padding-right: 6px;'>H${h}</th>`;
+  for (let h = startHead; h < endHead; h++) {
+    html += `<tr class="head-row" data-head="${h}"><th class='head-label' style='text-align: right; padding-right: 6px;'>H${h}</th>`;
     for (let l = 0; l < scores.length; l++) {
       const v = scores[l][h];
       const displayValue = v.toFixed(2);
@@ -187,6 +209,16 @@ function renderGrid(scores) {
     html += "</tr>";
   }
   grid.innerHTML = html;
+  
+  // Update head count info
+  if (headCountInfo) {
+    const showing = endHead - startHead;
+    if (showing === totalHeads) {
+      headCountInfo.textContent = `(${totalHeads} heads)`;
+    } else {
+      headCountInfo.textContent = `(showing ${showing} of ${totalHeads} heads)`;
+    }
+  }
 
   // Attach hover handlers to allow per-head token→token maps
   // Use requestAnimationFrame to ensure DOM is ready
@@ -519,6 +551,112 @@ setTimeout(() => {
   const initialBtn = document.querySelector(`.mode-btn[data-mode="${tokenMapMode}"]`);
   if (initialBtn) initialBtn.classList.add("active");
 }, 0);
+
+// Head filter controls
+const headFilterStartInput = document.getElementById("head-filter-start");
+const headFilterEndInput = document.getElementById("head-filter-end");
+const headFilterApplyBtn = document.getElementById("head-filter-apply");
+const headFilterResetBtn = document.getElementById("head-filter-reset");
+const headJumpInput = document.getElementById("head-jump-input");
+const headJumpBtn = document.getElementById("head-jump-btn");
+const headCountInfo = document.getElementById("head-count-info");
+
+function applyHeadFilter() {
+  const start = headFilterStartInput.value ? parseInt(headFilterStartInput.value) : null;
+  const end = headFilterEndInput.value ? parseInt(headFilterEndInput.value) : null;
+  
+  if (start !== null && start < 0) {
+    alert("Start head must be >= 0");
+    return;
+  }
+  if (end !== null && end < 0) {
+    alert("End head must be >= 0");
+    return;
+  }
+  if (start !== null && end !== null && start > end) {
+    alert("Start head must be <= end head");
+    return;
+  }
+  
+  headFilterStart = start;
+  headFilterEnd = end;
+  
+  if (currentScores) {
+    renderGrid(currentScores);
+  }
+}
+
+function resetHeadFilter() {
+  headFilterStart = null;
+  headFilterEnd = null;
+  headFilterStartInput.value = "0";
+  headFilterEndInput.value = "";
+  if (currentScores) {
+    renderGrid(currentScores);
+  }
+}
+
+function jumpToHead() {
+  const headNum = headJumpInput.value ? parseInt(headJumpInput.value) : null;
+  if (headNum === null || headNum < 0) {
+    alert("Please enter a valid head number (>= 0)");
+    return;
+  }
+  
+  if (!currentScores || !currentScores[0]) {
+    alert("No scores available. Please compute attention first.");
+    return;
+  }
+  
+  const totalHeads = currentScores[0].length;
+  if (headNum >= totalHeads) {
+    alert(`Head ${headNum} does not exist. Maximum head is ${totalHeads - 1}.`);
+    return;
+  }
+  
+  // Find the row element and scroll to it
+  const headRow = grid.querySelector(`tr.head-row[data-head="${headNum}"]`);
+  if (headRow) {
+    headRow.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Highlight the row briefly
+    headRow.style.backgroundColor = "rgba(255, 247, 0, 0.2)";
+    setTimeout(() => {
+      headRow.style.backgroundColor = "";
+    }, 1500);
+  } else {
+    // If row is not visible due to filter, show it
+    headFilterStart = headNum;
+    headFilterEnd = headNum;
+    headFilterStartInput.value = headNum;
+    headFilterEndInput.value = headNum;
+    renderGrid(currentScores);
+    setTimeout(() => {
+      const newRow = grid.querySelector(`tr.head-row[data-head="${headNum}"]`);
+      if (newRow) {
+        newRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        newRow.style.backgroundColor = "rgba(255, 247, 0, 0.2)";
+        setTimeout(() => {
+          newRow.style.backgroundColor = "";
+        }, 1500);
+      }
+    }, 100);
+  }
+}
+
+if (headFilterApplyBtn) {
+  headFilterApplyBtn.addEventListener("click", applyHeadFilter);
+}
+if (headFilterResetBtn) {
+  headFilterResetBtn.addEventListener("click", resetHeadFilter);
+}
+if (headJumpBtn) {
+  headJumpBtn.addEventListener("click", jumpToHead);
+}
+if (headJumpInput) {
+  headJumpInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") jumpToHead();
+  });
+}
 
 // Initial state
 modelStatus.textContent = "Load a model to start.";
