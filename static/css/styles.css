@@ -565,7 +565,13 @@ main {
   background: rgba(97, 218, 251, 0.2) !important;
 }
 .token.interpretation-mode {
-  cursor: crosshair;
+  cursor: pointer;
+}
+.token.interpretation-mode.interpretation-hover-add {
+  cursor: pointer;
+}
+.token.interpretation-mode.interpretation-hover-remove {
+  cursor: not-allowed;
 }
 .token.token-disabled {
   cursor: not-allowed;

@@ -27,8 +27,11 @@ let headFilterEnd = null;
 let layerFilterStart = null;
 let layerFilterEnd = null;
 let currentScores = null; // Store current scores for filtering
-let interpretationTokenMode = false; // "interpretation-add" | "interpretation-remove" | false
+let interpretationTokenMode = false; // "interpretation" | false
+let interpretationHoverMode = "add"; // "add" | "remove" - determined by hover
 let selectedInterpretationTokens = new Set(); // Set of token indices
+let lastHoveredTokenIdx = null; // Track last hovered token to prevent repeated triggers
+let hoverDebounceTimer = null; // Debounce timer for hover events
 let isDragging = false;
 let dragStart = null;
 let dragSelectionBox = null;
@@ -520,22 +523,84 @@ function renderTokens(tokens) {
     }
     
     // Interpretation mode
-    if (interpretationTokenMode === "interpretation-add" || interpretationTokenMode === "interpretation-remove") {
+    if (interpretationTokenMode === "interpretation") {
       classes += " interpretation-mode";
+      // Add hover mode indicator
+      if (isSelected) {
+        classes += " interpretation-hover-remove";
+      } else {
+        classes += " interpretation-hover-add";
+      }
     }
     
-    // 선택된 토큰: 배경색만 (Query/Key가 아닌 경우만)
+    // 선택된 토큰: 배경색만 (Query/Key가 아닌 경우만, 항상 표시)
     if (isSelected && !isInterpretationQuery && !isInterpretationKey) {
       bg = "rgba(97, 218, 251, 0.2)"; // 파란색 배경
       classes += " interpretation-selected";
     }
     
     const disabledAttr = disabled ? "disabled" : "";
-    pieces.push(
-      `<button class="${classes}" data-idx="${idx}" ${disabledAttr} style="display:inline-flex !important; flex-shrink:0 !important; margin:0 !important; border:${borderWidth} solid ${borderColor};background:${bg};color:${textColor};opacity:${opacity}">${base}</button>`
-    );
+    const tokenHtml = `<button class="${classes}" data-idx="${idx}" ${disabledAttr} style="display:inline-flex !important; flex-shrink:0 !important; margin:0 !important; border:${borderWidth} solid ${borderColor};background:${bg};color:${textColor};opacity:${opacity}">${base}</button>`;
+    pieces.push(tokenHtml);
   });
   tokensEl.innerHTML = pieces.join("");
+
+  // Setup hover handlers for interpretation mode - auto add/remove on hover
+  if (interpretationTokenMode === "interpretation") {
+    document.querySelectorAll(".token").forEach((el) => {
+      const idx = Number(el.getAttribute("data-idx"));
+      
+      // Query/Key tokens should always remain selected, so skip hover for them
+      if (idx === interpretationQueryIndex || idx === interpretationKeyIndex) {
+        return;
+      }
+      
+      el.addEventListener("mouseenter", () => {
+        // Prevent repeated triggers on the same token
+        if (lastHoveredTokenIdx === idx) {
+          return;
+        }
+        
+        // Clear any pending debounce timer
+        if (hoverDebounceTimer) {
+          clearTimeout(hoverDebounceTimer);
+        }
+        
+        // Debounce hover events to prevent too frequent updates
+        hoverDebounceTimer = setTimeout(() => {
+          // Check current state at hover time (not at render time)
+          const isSelected = selectedInterpretationTokens.has(idx);
+          
+          // Skip if this is Query or Key token (they should always be selected)
+          if (idx === interpretationQueryIndex || idx === interpretationKeyIndex) {
+            return;
+          }
+          
+          // Auto add/remove on hover (only for interpretation tokens, not Query/Key)
+          if (isSelected) {
+            // Remove if already selected
+            selectedInterpretationTokens.delete(idx);
+          } else {
+            // Add if not selected
+            selectedInterpretationTokens.add(idx);
+          }
+          
+          lastHoveredTokenIdx = idx;
+          
+          // Re-render to update visual state
+          renderTokens(tokens);
+          updateFilteredVisualizations();
+        }, 50); // 50ms debounce
+      });
+      
+      el.addEventListener("mouseleave", () => {
+        // Reset last hovered token when leaving
+        if (lastHoveredTokenIdx === idx) {
+          lastHoveredTokenIdx = null;
+        }
+      });
+    });
+  }
 
   // Update interpretation status
   const queryStatusEl = document.getElementById("query-status");
@@ -565,10 +630,8 @@ function renderTokens(tokens) {
   }
   
   if (countEl) {
-    // Count only interpretation tokens (exclude Query/Key)
-    const interpretationCount = Array.from(selectedInterpretationTokens).filter(
-      idx => idx !== interpretationQueryIndex && idx !== interpretationKeyIndex
-    ).length;
+    // Count all selected tokens (including Query/Key)
+    const interpretationCount = selectedInterpretationTokens.size;
     if (interpretationCount > 0) {
       countEl.textContent = `${interpretationCount} tokens selected`;
     } else {
@@ -576,39 +639,13 @@ function renderTokens(tokens) {
     }
   }
 
-  // Setup click handlers
+  // Setup click handlers and hover for interpretation mode
   document.querySelectorAll(".token").forEach((el) => {
     el.addEventListener("click", (e) => {
-      if (interpretationTokenMode === "interpretation-add") {
-        // Interpretation Add Mode: add tokens to interpretation set (independent of query/key)
+      if (interpretationTokenMode === "interpretation") {
+        // In interpretation mode, hover handles add/remove automatically
+        // Click is not needed, but we prevent default behavior
         e.stopPropagation();
-        const idx = Number(el.getAttribute("data-idx"));
-        
-        // Simply toggle token selection for visualization filtering
-        if (selectedInterpretationTokens.has(idx)) {
-          selectedInterpretationTokens.delete(idx);
-        } else {
-          selectedInterpretationTokens.add(idx);
-        }
-        renderTokens(tokens);
-        updateFilteredVisualizations();
-        return;
-      } else if (interpretationTokenMode === "interpretation-remove") {
-        // Interpretation Remove Mode: remove tokens from interpretation set
-        e.stopPropagation();
-        const idx = Number(el.getAttribute("data-idx"));
-        
-        selectedInterpretationTokens.delete(idx);
-        if (idx === interpretationQueryIndex) {
-          interpretationQueryIndex = null;
-          interpretationKeyIndex = null;
-          selectedInterpretationTokens.clear();
-        } else if (idx === interpretationKeyIndex) {
-          interpretationKeyIndex = null;
-          selectedInterpretationTokens.delete(idx);
-        }
-        renderTokens(tokens);
-        updateFilteredVisualizations();
         return;
       }
       
@@ -627,16 +664,22 @@ function renderTokens(tokens) {
         interpretationQueryIndex = idx;
         interpretationKeyIndex = null;
         selectedInterpretationTokens.clear();
+        // Add Query to selected tokens
+        selectedInterpretationTokens.add(interpretationQueryIndex);
       } else if (interpretationKeyIndex === null) {
         // Query is selected, now select key
         if (idx === interpretationQueryIndex) {
           // Clicking same query again - reset query
+          selectedInterpretationTokens.delete(interpretationQueryIndex);
           interpretationQueryIndex = null;
           selectedInterpretationTokens.clear();
         } else if (idx <= interpretationQueryIndex) {
           // Select key (SRC) - must be before or equal to query
           interpretationKeyIndex = idx;
+          // Ensure Query and Key are in selected tokens
           selectedInterpretationTokens.clear();
+          selectedInterpretationTokens.add(interpretationQueryIndex);
+          selectedInterpretationTokens.add(interpretationKeyIndex);
         } else {
           // Cannot select key after query (causal attention)
           alert("Key (SRC) must be at or before Query (DST) position due to causal attention.");
@@ -646,34 +689,43 @@ function renderTokens(tokens) {
         // Both Query and Key selected
         if (idx === interpretationQueryIndex) {
           // Clicking query again - reset to new query only
+          selectedInterpretationTokens.delete(interpretationQueryIndex);
+          selectedInterpretationTokens.delete(interpretationKeyIndex);
           interpretationQueryIndex = idx;
           interpretationKeyIndex = null;
           selectedInterpretationTokens.clear();
+          selectedInterpretationTokens.add(interpretationQueryIndex);
         } else if (idx === interpretationKeyIndex) {
           // Clicking key again - reset key only
+          selectedInterpretationTokens.delete(interpretationKeyIndex);
           interpretationKeyIndex = null;
-          selectedInterpretationTokens.clear();
+          // Keep Query in selected tokens
+          if (!selectedInterpretationTokens.has(interpretationQueryIndex)) {
+            selectedInterpretationTokens.add(interpretationQueryIndex);
+          }
         } else if (idx > interpretationQueryIndex) {
           // Clicking after query - select as new query
+          selectedInterpretationTokens.delete(interpretationQueryIndex);
+          selectedInterpretationTokens.delete(interpretationKeyIndex);
           interpretationQueryIndex = idx;
           interpretationKeyIndex = null;
           selectedInterpretationTokens.clear();
+          selectedInterpretationTokens.add(interpretationQueryIndex);
         } else {
           // Query/Key가 모두 선택된 상태에서 다른 토큰 클릭 시
-          // Interpretation Add Mode가 아닌 경우에는 아무것도 하지 않음
-          // (Interpretation Add Mode에서만 토큰 추가 가능)
-          if (interpretationTokenMode !== "interpretation-add" && interpretationTokenMode !== "interpretation-remove") {
+          // Interpretation Mode가 아닌 경우에는 아무것도 하지 않음
+          if (interpretationTokenMode !== "interpretation") {
             // Do nothing - just maintain Query/Key selection
             return;
           }
-          // Interpretation mode에서는 토큰 추가/제거 가능
-          if (selectedInterpretationTokens.has(idx)) {
+          // Interpretation mode에서는 hover 상태에 따라 토큰 추가/제거
+          const isCurrentlySelected = selectedInterpretationTokens.has(idx);
+          if (isCurrentlySelected) {
+            // Remove if already selected
             selectedInterpretationTokens.delete(idx);
           } else {
-            // Add to selection if it's between key and query
-            if (idx >= interpretationKeyIndex && idx <= interpretationQueryIndex) {
-              selectedInterpretationTokens.add(idx);
-            }
+            // Add if not selected
+            selectedInterpretationTokens.add(idx);
           }
         }
       }
@@ -699,7 +751,7 @@ function renderTokens(tokens) {
   });
 
   // Setup drag selection
-  if (interpretationTokenMode === "interpretation-add" || interpretationTokenMode === "interpretation-remove") {
+  if (interpretationTokenMode === "interpretation") {
     setupDragSelection();
   }
 }
@@ -708,7 +760,7 @@ function setupDragSelection() {
   if (!tokensEl) return;
   
   tokensEl.addEventListener("mousedown", (e) => {
-    if ((interpretationTokenMode !== "interpretation-add" && interpretationTokenMode !== "interpretation-remove") || e.target.closest(".token")) return;
+    if (interpretationTokenMode !== "interpretation" || e.target.closest(".token")) return;
     isDragging = true;
     const rect = tokensEl.getBoundingClientRect();
     dragStart = {
@@ -761,18 +813,21 @@ function setupDragSelection() {
           tokenCenterY >= top && tokenCenterY <= top + height) {
         const idx = Number(tokenEl.getAttribute("data-idx"));
         
-        if (interpretationTokenMode === "interpretation-remove") {
-          selectedInterpretationTokens.delete(idx);
-          if (idx === interpretationQueryIndex) {
-            interpretationQueryIndex = null;
-            interpretationKeyIndex = null;
-            selectedInterpretationTokens.clear();
-          } else if (idx === interpretationKeyIndex) {
-            interpretationKeyIndex = null;
+        if (interpretationTokenMode === "interpretation") {
+          // In interpretation mode: determine add/remove based on current selection state
+          // Skip Query/Key tokens - they should always remain selected
+          if (idx === interpretationQueryIndex || idx === interpretationKeyIndex) {
+            return;
           }
-        } else if (interpretationTokenMode === "interpretation-add") {
-          // In add mode: freely add any tokens for visualization filtering
-          selectedInterpretationTokens.add(idx);
+          
+          const isCurrentlySelected = selectedInterpretationTokens.has(idx);
+          if (isCurrentlySelected) {
+            // Remove if already selected
+            selectedInterpretationTokens.delete(idx);
+          } else {
+            // Add if not selected
+            selectedInterpretationTokens.add(idx);
+          }
         }
       }
     });
@@ -1173,23 +1228,24 @@ if (layerFilterResetBtn) {
 }
 
 // Mode button handlers
-const interpretationAddModeBtn = document.getElementById("interpretation-add-mode-btn");
-const interpretationRemoveModeBtn = document.getElementById("interpretation-remove-mode-btn");
+const interpretationModeBtn = document.getElementById("interpretation-mode-btn");
 
 function setMode(mode) {
-  // Remove active class from all buttons
-  [interpretationAddModeBtn, interpretationRemoveModeBtn].forEach(btn => {
-    if (btn) btn.classList.remove("active");
-  });
-  
   // Set new mode
   interpretationTokenMode = mode;
   
+  // Reset hover tracking when mode changes
+  lastHoveredTokenIdx = null;
+  if (hoverDebounceTimer) {
+    clearTimeout(hoverDebounceTimer);
+    hoverDebounceTimer = null;
+  }
+  
   // Add active class to current mode button
-  if (mode === "interpretation-add" && interpretationAddModeBtn) {
-    interpretationAddModeBtn.classList.add("active");
-  } else if (mode === "interpretation-remove" && interpretationRemoveModeBtn) {
-    interpretationRemoveModeBtn.classList.add("active");
+  if (mode === "interpretation" && interpretationModeBtn) {
+    interpretationModeBtn.classList.add("active");
+  } else if (interpretationModeBtn) {
+    interpretationModeBtn.classList.remove("active");
   }
   
   // Don't clear selectedInterpretationTokens when mode is turned off
@@ -1201,22 +1257,12 @@ function setMode(mode) {
   }
 }
 
-if (interpretationAddModeBtn) {
-  interpretationAddModeBtn.addEventListener("click", () => {
-    if (interpretationTokenMode === "interpretation-add") {
+if (interpretationModeBtn) {
+  interpretationModeBtn.addEventListener("click", () => {
+    if (interpretationTokenMode === "interpretation") {
       setMode(false); // Toggle off
     } else {
-      setMode("interpretation-add");
-    }
-  });
-}
-
-if (interpretationRemoveModeBtn) {
-  interpretationRemoveModeBtn.addEventListener("click", () => {
-    if (interpretationTokenMode === "interpretation-remove") {
-      setMode(false); // Toggle off
-    } else {
-      setMode("interpretation-remove");
+      setMode("interpretation");
     }
   });
 }
@@ -1228,12 +1274,17 @@ const removeAllBtn = document.getElementById("remove-all-btn");
 if (selectAllBtn) {
   selectAllBtn.addEventListener("click", () => {
     if (!currentTokens) return;
-    // Select all tokens (except Query/Key which are managed separately)
+    // Select all tokens (including Query/Key)
     currentTokens.forEach((_, idx) => {
-      if (idx !== interpretationQueryIndex && idx !== interpretationKeyIndex) {
-        selectedInterpretationTokens.add(idx);
-      }
+      selectedInterpretationTokens.add(idx);
     });
+    // Ensure Query/Key are in the set
+    if (interpretationQueryIndex !== null) {
+      selectedInterpretationTokens.add(interpretationQueryIndex);
+    }
+    if (interpretationKeyIndex !== null) {
+      selectedInterpretationTokens.add(interpretationKeyIndex);
+    }
     if (currentTokens) {
       renderTokens(currentTokens);
       updateFilteredVisualizations();
@@ -1243,8 +1294,17 @@ if (selectAllBtn) {
 
 if (removeAllBtn) {
   removeAllBtn.addEventListener("click", () => {
-    // Remove all selected interpretation tokens (Query/Key는 별도 관리이므로 제외)
+    // Remove all selected interpretation tokens, but keep Query/Key if they exist
+    const queryIdx = interpretationQueryIndex;
+    const keyIdx = interpretationKeyIndex;
     selectedInterpretationTokens.clear();
+    // Re-add Query/Key if they exist
+    if (queryIdx !== null) {
+      selectedInterpretationTokens.add(queryIdx);
+    }
+    if (keyIdx !== null) {
+      selectedInterpretationTokens.add(keyIdx);
+    }
     if (currentTokens) {
       renderTokens(currentTokens);
       updateFilteredVisualizations();
